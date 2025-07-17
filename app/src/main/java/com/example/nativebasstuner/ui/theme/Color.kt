@@ -1,4 +1,4 @@
-package com.example.nativeguitartuner.ui.theme
+package com.example.nativebasstuner.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
