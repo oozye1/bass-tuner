@@ -52,6 +52,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
+import androidx.lifecycle.lifecycleScope
 import be.tarsos.dsp.AudioDispatcher
 import be.tarsos.dsp.AudioEvent
 import be.tarsos.dsp.AudioProcessor
@@ -69,6 +70,7 @@ import kotlinx.coroutines.*
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.log2
+import android.media.MediaPlayer
 
 enum class VisualizerMode { NONE, BARS, WAVEFORM }
 
@@ -113,6 +115,7 @@ class MainActivity : ComponentActivity() {
     private var tempo by mutableIntStateOf(120)
     private var timeSignatureIndex by mutableIntStateOf(0)
     private var metronomeJob: Job? = null
+    private var metronomePlayer: MediaPlayer? = null
 
     // Visualizer
     private var visualizerMode by mutableStateOf(VisualizerMode.WAVEFORM)
@@ -124,8 +127,8 @@ class MainActivity : ComponentActivity() {
     private var soundUp = 0
     private var soundDown = 0
     private var soundIntune = 0
-    private var soundTick = 0
     private var soundsLoaded by mutableStateOf(false)
+    private var metronomeReady by mutableStateOf(false)
 
     // Drawables
     private var selectedPedal by mutableIntStateOf(R.drawable.bass1) // Default for Bass
@@ -134,14 +137,14 @@ class MainActivity : ComponentActivity() {
     // Audio
     private var dispatcher: AudioDispatcher? = null
     private var audioThread: Thread? = null
-    private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private var isActiveTuner by mutableStateOf(true)
 
     // Pitch helpers
     private val pitchBuffer = mutableListOf<Float>()
     private var lastFeedbackTime = 0L
     private var inTuneStartTime = 0L
     private var inTuneSoundPlayed = false
+    private var lastPitchDetectedTime = System.currentTimeMillis()
+    private val PITCH_TIMEOUT_MS = 600L // Time to wait before centering needle
 
     // Resources
     private lateinit var pedalImages: List<Int>
@@ -200,6 +203,17 @@ class MainActivity : ComponentActivity() {
         )
 
         setupSoundPool()
+        metronomePlayer = MediaPlayer.create(this, R.raw.metronome_tick)
+        metronomePlayer?.setOnPreparedListener {
+            metronomeReady = true
+            it.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+            )
+        }
+
 
         setContent {
             val window = this@MainActivity.window
@@ -207,6 +221,21 @@ class MainActivity : ComponentActivity() {
                 val keepOn = isRecording || isMetronomeRunning
                 if (keepOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+
+            // --- FIX: Robust, Lifecycle-Aware Needle Animation Loop ---
+            // This effect runs for the entire lifecycle of the composable. It safely
+            // handles animation and is automatically cancelled to prevent leaks.
+            LaunchedEffect(Unit) {
+                while (true) {
+                    delay(16) // Aim for ~60 FPS
+                    val smoothing = 0.1f
+                    if (abs(smoothedAngle - rotationAngle) > 0.01f) {
+                        smoothedAngle += (rotationAngle - smoothedAngle) * smoothing
+                    } else if (smoothedAngle != rotationAngle) {
+                        smoothedAngle = rotationAngle // Snap to the final value
+                    }
+                }
             }
 
             MaterialTheme {
@@ -228,7 +257,7 @@ class MainActivity : ComponentActivity() {
                                 .padding(top = 24.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            MetronomeControls(enabled = soundsLoaded)
+                            MetronomeControls(enabled = metronomeReady)
                             Spacer(Modifier.height(16.dp))
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -306,20 +335,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-
-        // Smooth needle animation
-        activityScope.launch {
-            while (isActiveTuner) {
-                delay(16)
-                val smoothing = 0.1f
-                smoothedAngle += (rotationAngle - smoothedAngle) * smoothing
-            }
-        }
     }
 
     /* ================================  ADS  ================================ */
 
     private fun loadAd() {
+        // Ads will load on the main thread, no need for a separate scope here.
         val adUnitId = getString(R.string.native_ad_unit_id)
         val adLoader = AdLoader.Builder(this, adUnitId)
             .forNativeAd { ad ->
@@ -343,7 +364,7 @@ class MainActivity : ComponentActivity() {
 
     private fun setupSoundPool() {
         val audioAttr = AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+            .setUsage(AudioAttributes.USAGE_GAME)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
 
@@ -353,27 +374,31 @@ class MainActivity : ComponentActivity() {
             .build()
 
         var loaded = 0
-        val total = 4
+        val total = 3 // Metronome tick is no longer loaded here
         soundPool.setOnLoadCompleteListener { _, _, status ->
             if (status == 0) {
                 loaded++
-                if (loaded == total) activityScope.launch { soundsLoaded = true }
+                if (loaded == total) {
+                    // FIX: Use lifecycleScope to safely update state.
+                    lifecycleScope.launch { soundsLoaded = true }
+                }
             }
         }
         soundUp = soundPool.load(this, R.raw.up, 1)
         soundDown = soundPool.load(this, R.raw.down, 1)
         soundIntune = soundPool.load(this, R.raw.intune, 1)
-        soundTick = soundPool.load(this, R.raw.metronome_tick, 1)
     }
 
-    override fun onStart() { super.onStart(); isActiveTuner = true }
-    override fun onStop()  { super.onStop();  isActiveTuner = false; stopMetronome() }
+    override fun onStart() { super.onStart() }
+    override fun onStop()  { super.onStop(); stopMetronome() }
 
     override fun onDestroy() {
         super.onDestroy()
         nativeAd?.destroy()
         soundPool.release()
-        activityScope.cancel()
+        metronomePlayer?.release()
+        metronomePlayer = null
+        dispatcher?.stop() // Ensure dispatcher is stopped
     }
 
     /* ============================  PERMISSION  ============================= */
@@ -381,7 +406,7 @@ class MainActivity : ComponentActivity() {
     private fun requestPermissionAndStartTuner() {
         when {
             ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
-                    PackageManager.PERMISSION_GRANTED -> activityScope.launch { startTuner() }
+                    PackageManager.PERMISSION_GRANTED -> lifecycleScope.launch { startTuner() } // FIX: Use lifecycleScope
             else -> ActivityCompat.requestPermissions(
                 this,
                 arrayOf(Manifest.permission.RECORD_AUDIO),
@@ -399,7 +424,7 @@ class MainActivity : ComponentActivity() {
             grantResults.isNotEmpty() &&
             grantResults[0] == PackageManager.PERMISSION_GRANTED
         ) {
-            activityScope.launch { startTuner() }
+            lifecycleScope.launch { startTuner() } // FIX: Use lifecycleScope
         } else {
             statusText = "Permission Denied"
             statusColor = Color.Red
@@ -424,7 +449,8 @@ class MainActivity : ComponentActivity() {
 
             val pitchHandler = PitchDetectionHandler { result, _ ->
                 if (result.isPitched && result.probability > CONFIDENCE_THRESHOLD) {
-                    activityScope.launch { updatePitch(result.pitch) }
+                    // FIX: Use lifecycleScope to ensure UI updates are safe.
+                    lifecycleScope.launch { updatePitch(result.pitch) }
                 }
             }
             val pitchProcessor = PitchProcessor(
@@ -438,8 +464,8 @@ class MainActivity : ComponentActivity() {
                 private val fft = FFT(AUDIO_BUFFER_SIZE)
                 override fun process(event: AudioEvent): Boolean {
                     val buf = event.floatBuffer.clone()
-
-                    activityScope.launch {
+                    // FIX: Use lifecycleScope to ensure UI updates are safe.
+                    lifecycleScope.launch {
                         // Bars
                         val forFft = buf.clone()
                         val mags = FloatArray(forFft.size / 2)
@@ -505,34 +531,46 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updatePitch(pitch: Float) {
+        if (!isRecording) return // Don't update if tuner has been stopped.
+
         pitchBuffer.add(pitch)
         if (pitchBuffer.size < PITCH_BUFFER_SIZE) return
 
         val stablePitch = pitchBuffer.sorted()[PITCH_BUFFER_SIZE / 2]
         pitchBuffer.removeAt(0)
 
-        val nearest = getNearestNoteFrequency(stablePitch) ?: return
-        val (noteFreq, noteName) = nearest
-        cents = 1200f * log2(stablePitch / noteFreq)
-        rotationAngle = (cents.coerceIn(-50f, 50f) / 50f) * 90f
-        detectedNote = noteName
-        frequencyText = String.format(Locale.US, "%.2f Hz", stablePitch)
+        val nearest = getNearestNoteFrequency(stablePitch)
+        if (nearest != null) {
+            val (noteFreq, noteName) = nearest
+            cents = 1200f * log2(stablePitch / noteFreq)
+            rotationAngle = (cents.coerceIn(-50f, 50f) / 50f) * 90f
+            detectedNote = noteName
+            frequencyText = String.format(Locale.US, "%.2f Hz", stablePitch)
+            lastPitchDetectedTime = System.currentTimeMillis()
 
-        val inTune = abs(cents) <= IN_TUNE_CENTS_THRESHOLD
-        if (inTune) {
-            statusText = "$noteName (In Tune)"
-            statusColor = Color.Green
-            if (inTuneStartTime == 0L) inTuneStartTime = System.currentTimeMillis()
-            if (System.currentTimeMillis() - inTuneStartTime >= IN_TUNE_DELAY_MS && !inTuneSoundPlayed) {
-                playFeedbackSound(soundIntune)
-                inTuneSoundPlayed = true
+            val inTune = abs(cents) <= IN_TUNE_CENTS_THRESHOLD
+            if (inTune) {
+                statusText = "$noteName (In Tune)"
+                statusColor = Color.Green
+                if (inTuneStartTime == 0L) inTuneStartTime = System.currentTimeMillis()
+                if (System.currentTimeMillis() - inTuneStartTime >= IN_TUNE_DELAY_MS && !inTuneSoundPlayed) {
+                    playFeedbackSound(soundIntune)
+                    inTuneSoundPlayed = true
+                }
+            } else {
+                inTuneStartTime = 0L
+                inTuneSoundPlayed = false
+                statusText = if (cents < 0) "$noteName (Tune Up)" else "$noteName (Tune Down)"
+                statusColor = Color(0xFFFFA000)
+                playFeedbackSound(if (cents < 0) soundUp else soundDown)
             }
         } else {
-            inTuneStartTime = 0L
-            inTuneSoundPlayed = false
-            statusText = if (cents < 0) "$noteName (Tune Up)" else "$noteName (Tune Down)"
-            statusColor = Color(0xFFFFA000)
-            playFeedbackSound(if (cents < 0) soundUp else soundDown)
+            // No valid pitch detected, check timeout
+            if (System.currentTimeMillis() - lastPitchDetectedTime > PITCH_TIMEOUT_MS) {
+                rotationAngle = 0f // Center the needle
+                detectedNote = "--"
+                frequencyText = "0.00 Hz"
+            }
         }
     }
 
@@ -540,7 +578,8 @@ class MainActivity : ComponentActivity() {
         if (!soundsLoaded) return
         val now = System.currentTimeMillis()
         val cooldown = if (soundId == soundIntune) 0 else 1500
-        if (voiceModeEnabled && isActiveTuner && now - lastFeedbackTime > cooldown) {
+        // Check 'isRecording' to prevent sound playing after user hits stop.
+        if (voiceModeEnabled && isRecording && now - lastFeedbackTime > cooldown) {
             soundPool.play(soundId, 1f, 1f, 1, 0, 1f)
             lastFeedbackTime = now
         }
@@ -549,12 +588,12 @@ class MainActivity : ComponentActivity() {
     /* ============================  METRONOME  ============================== */
 
     private fun startMetronome() {
-        if (isMetronomeRunning || !soundsLoaded) return
+        if (isMetronomeRunning || !metronomeReady) return
         isMetronomeRunning = true
-        metronomeJob = activityScope.launch(Dispatchers.Default) {
+        metronomeJob = lifecycleScope.launch(Dispatchers.Default) {
             while (isActive) {
                 withContext(Dispatchers.Main) {
-                    soundPool.play(soundTick, 1f, 1f, 0, 0, 1f)
+                    metronomePlayer?.takeIf { it.isLooping.not() }?.start()
                 }
                 delay(60_000L / tempo)
             }
@@ -764,7 +803,7 @@ class MainActivity : ComponentActivity() {
             val bars = 64
             val barWidth = size.width / bars
             val space = 1.dp.toPx()
-            val maxMag = magnitudes.take(bars).maxOrNull()!!.coerceAtLeast(1f)
+            val maxMag = magnitudes.take(bars).maxOrNull()?.coerceAtLeast(1f) ?: 1f
             magnitudes.take(bars).forEachIndexed { i, m ->
                 val h = (m / maxMag).coerceIn(0f, 1f) * size.height
                 val color = lerp(Color.Green, Color.Red, m / maxMag)
