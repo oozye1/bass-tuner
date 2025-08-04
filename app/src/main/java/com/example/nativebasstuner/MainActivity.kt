@@ -80,8 +80,8 @@ class MainActivity : ComponentActivity() {
         private const val SAMPLE_RATE = 22050
         private const val AUDIO_BUFFER_SIZE = 4096
         private const val BUFFER_OVERLAP = 2048
-        private const val CONFIDENCE_THRESHOLD = 0.9f
-        private const val PITCH_BUFFER_SIZE = 5
+        private const val CONFIDENCE_THRESHOLD = 0.85f
+        private const val PITCH_BUFFER_SIZE = 5 // The "goldilocks" value for smoothness
         private const val IN_TUNE_DELAY_MS = 2500L
         private const val IN_TUNE_CENTS_THRESHOLD = 3.0f
         private const val PREFS_NAME = "TunerPrefs"
@@ -140,7 +140,7 @@ class MainActivity : ComponentActivity() {
     private var inTuneStartTime = 0L
     private var inTuneSoundPlayed = false
     private var lastPitchDetectedTime = System.currentTimeMillis()
-    private val PITCH_TIMEOUT_MS = 600L
+    private val PITCH_TIMEOUT_MS = 300L
 
     // Resources
     private lateinit var pedalImages: List<Int>
@@ -334,6 +334,8 @@ class MainActivity : ComponentActivity() {
                 val pitchHandler = PitchDetectionHandler { result, _ ->
                     if (result.isPitched && result.probability > CONFIDENCE_THRESHOLD) {
                         lifecycleScope.launch(Dispatchers.Main) { updatePitch(result.pitch) }
+                    } else {
+                        lifecycleScope.launch(Dispatchers.Main) { handleNoPitchDetected() }
                     }
                 }
                 val pitchProcessor = PitchProcessor(
@@ -341,7 +343,7 @@ class MainActivity : ComponentActivity() {
                     SAMPLE_RATE.toFloat(), AUDIO_BUFFER_SIZE, pitchHandler
                 )
 
-                // --- VISUALIZER LOGIC (RESTORED AND FIXED) ---
+                // --- VISUALIZER LOGIC (Correct and Isolated) ---
                 val fftProcessor = object : AudioProcessor {
                     private val fft = FFT(AUDIO_BUFFER_SIZE)
                     private val mags = FloatArray(AUDIO_BUFFER_SIZE / 2)
@@ -368,11 +370,9 @@ class MainActivity : ComponentActivity() {
 
                 // --- THE DEFINITIVE PIPELINE ---
                 dispatcher?.apply {
-                    // 1. Visualizer gets the raw audio first.
                     addAudioProcessor(fftProcessor)
-                    // 2. A gentle filter cleans the signal *only* for the pitch detector.
+                    // *** A gentle filter to stabilize the A and D strings ***
                     addAudioProcessor(LowPassFS(800f, SAMPLE_RATE.toFloat()))
-                    // 3. The pitch detector gets the clean signal.
                     addAudioProcessor(pitchProcessor)
                 }
 
@@ -395,6 +395,20 @@ class MainActivity : ComponentActivity() {
                 audioThread?.interrupt()
                 dispatcher = null
                 audioThread = null
+            }
+        }
+    }
+
+    private fun handleNoPitchDetected() {
+        if (System.currentTimeMillis() - lastPitchDetectedTime > PITCH_TIMEOUT_MS) {
+            if (detectedNote != "--") {
+                Log.d(TAG, "Pitch timeout. Resetting UI.")
+                rotationAngle = 0f
+                detectedNote = "--"
+                frequencyText = "0.00 Hz"
+                statusText = "Listening…"
+                statusColor = Color.White
+                pitchBuffer.clear()
             }
         }
     }
@@ -429,19 +443,39 @@ class MainActivity : ComponentActivity() {
 
     private fun updatePitch(pitch: Float) {
         if (!isRecording) return
+        lastPitchDetectedTime = System.currentTimeMillis()
         pitchBuffer.add(pitch)
         if (pitchBuffer.size < PITCH_BUFFER_SIZE) return
-        val stablePitch = pitchBuffer.sorted()[PITCH_BUFFER_SIZE / 2]
+        val stablePitch = pitchBuffer.sorted()[(PITCH_BUFFER_SIZE - 1) / 2]
         pitchBuffer.removeAt(0)
 
-        val nearest = getNearestNoteFrequency(stablePitch)
+        // --- INTELLIGENT HARMONIC CORRECTION ---
+        val candidates = listOf(stablePitch, stablePitch / 2f, stablePitch / 3f, stablePitch / 4f)
+        var bestPitch = stablePitch
+        var minCentsDiff = Float.MAX_VALUE
+
+        for (candidate in candidates) {
+            if (candidate > 20f) { // Ignore candidates too low to be musical
+                val nearestNote = noteFrequencies.minByOrNull { abs(it.first - candidate) }
+                if (nearestNote != null) {
+                    val centsDiff = abs(1200f * log2(candidate / nearestNote.first))
+                    if (centsDiff < minCentsDiff) {
+                        minCentsDiff = centsDiff
+                        bestPitch = candidate
+                    }
+                }
+            }
+        }
+        val correctedPitch = bestPitch
+        // --- END OF HARMONIC CORRECTION ---
+
+        val nearest = getNearestNoteFrequency(correctedPitch)
         if (nearest != null) {
             val (noteFreq, noteName) = nearest
-            cents = 1200f * log2(stablePitch / noteFreq)
+            cents = 1200f * log2(correctedPitch / noteFreq)
             rotationAngle = (cents.coerceIn(-50f, 50f) / 50f) * 90f
             detectedNote = noteName
-            frequencyText = String.format(Locale.US, "%.2f Hz", stablePitch)
-            lastPitchDetectedTime = System.currentTimeMillis()
+            frequencyText = String.format(Locale.US, "%.2f Hz", correctedPitch)
 
             val inTune = abs(cents) <= IN_TUNE_CENTS_THRESHOLD
             if (inTune) {
@@ -460,11 +494,7 @@ class MainActivity : ComponentActivity() {
                 playFeedbackSound(if (cents < 0) soundUp else soundDown)
             }
         } else {
-            if (System.currentTimeMillis() - lastPitchDetectedTime > PITCH_TIMEOUT_MS) {
-                rotationAngle = 0f
-                detectedNote = "--"
-                frequencyText = "0.00 Hz"
-            }
+            handleNoPitchDetected()
         }
     }
 
