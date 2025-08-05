@@ -14,7 +14,7 @@ android {
         applicationId = "co.uk.doverguitarteacher.voicebasstuner" // Your package name
         minSdk = 24 // Or your project's minSdk
         targetSdk = 36 // Or your project's targetSdk
-        versionCode = 13
+        versionCode = 14
         versionName = "1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
