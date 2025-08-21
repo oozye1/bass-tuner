@@ -15,10 +15,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.slideInVertically
+// removed: androidx.compose.animation.AnimatedVisibility
+// removed: slideInVertically / fadeIn (not used anymore)
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -41,6 +39,9 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -207,11 +208,22 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     Box(modifier = Modifier.fillMaxSize()) {
-                        Image(painter = painterResource(id = selectedPedal), contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                        Column(Modifier.align(Alignment.TopCenter).padding(top = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Image(
+                            painter = painterResource(id = selectedPedal),
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                        Column(
+                            Modifier.align(Alignment.TopCenter).padding(top = 24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
                             MetronomeControls(enabled = metronomeReady)
                             Spacer(Modifier.height(16.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Button(
                                     onClick = { if (isRecording) stopTuner() else requestPermissionAndStartTuner() },
                                     colors = ButtonDefaults.buttonColors(containerColor = Color.Black, contentColor = Color.White)
@@ -223,22 +235,37 @@ class MainActivity : ComponentActivity() {
                                 VisualizerToggleButton()
                             }
                         }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.align(Alignment.Center).offset(y = (-15).dp)) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.align(Alignment.Center).offset(y = (-15).dp)
+                        ) {
                             LedTuningStrip(activeLedIndex)
-                            Image(painter = painterResource(id = selectedVDU), contentDescription = null, modifier = Modifier.size(240.dp))
+                            Image(
+                                painter = painterResource(id = selectedVDU),
+                                contentDescription = null,
+                                modifier = Modifier.size(240.dp)
+                            )
                         }
                         Image(
                             painter = painterResource(id = R.drawable.needle), contentDescription = null,
-                            modifier = Modifier.size(140.dp).align(Alignment.Center).offset(y = (-15).dp).graphicsLayer {
-                                rotationZ = smoothedAngle
-                                transformOrigin = TransformOrigin(0.5f, 0.84f)
-                            }
+                            modifier = Modifier
+                                .size(140.dp)
+                                .align(Alignment.Center)
+                                .offset(y = (-15).dp)
+                                .graphicsLayer {
+                                    rotationZ = smoothedAngle
+                                    transformOrigin = TransformOrigin(0.5f, 0.84f)
+                                }
                         )
                         Icon(
                             imageVector = if (voiceModeEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
                             contentDescription = "Toggle Voice Feedback",
                             tint = if (voiceModeEnabled) Color.Green else Color.Red,
-                            modifier = Modifier.padding(12.dp).size(28.dp).align(Alignment.TopStart).clickable { if (soundsLoaded) voiceModeEnabled = !voiceModeEnabled }
+                            modifier = Modifier
+                                .padding(12.dp)
+                                .size(28.dp)
+                                .align(Alignment.TopStart)
+                                .clickable { if (soundsLoaded) voiceModeEnabled = !voiceModeEnabled }
                         )
                         Box(Modifier.align(Alignment.BottomCenter)) { BottomControls() }
                     }
@@ -263,7 +290,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setupSoundPool() {
-        val audioAttr = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
+        val audioAttr = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_GAME)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
         soundPool = SoundPool.Builder().setMaxStreams(5).setAudioAttributes(audioAttr).build()
         var loaded = 0
         val total = 4
@@ -295,8 +325,10 @@ class MainActivity : ComponentActivity() {
 
     private fun requestPermissionAndStartTuner() {
         when {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED -> lifecycleScope.launch { startTuner() }
-            else -> ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_AUDIO_PERMISSION)
+            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED ->
+                lifecycleScope.launch { startTuner() }
+            else ->
+                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_AUDIO_PERMISSION)
         }
     }
 
@@ -479,7 +511,7 @@ class MainActivity : ComponentActivity() {
 
             val inTune = abs(cents) <= IN_TUNE_CENTS_THRESHOLD
             if (inTune) {
-                statusText = "$noteName (In Tune)"
+                statusText = "$noteName (In Tune)"
                 statusColor = Color.Green
                 if (inTuneStartTime == 0L) inTuneStartTime = System.currentTimeMillis()
                 if (System.currentTimeMillis() - inTuneStartTime >= IN_TUNE_DELAY_MS && !inTuneSoundPlayed) {
@@ -489,7 +521,7 @@ class MainActivity : ComponentActivity() {
             } else {
                 inTuneStartTime = 0L
                 inTuneSoundPlayed = false
-                statusText = if (cents < 0) "$noteName (Tune Up)" else "$noteName (Tune Down)"
+                statusText = if (cents < 0) "$noteName (Tune Up)" else "$noteName (Tune Down)"
                 statusColor = Color(0xFFFFA000)
                 playFeedbackSound(if (cents < 0) soundUp else soundDown)
             }
@@ -546,40 +578,111 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     fun BottomControls() {
-        Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            Modifier.fillMaxWidth().padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             VisualizerDisplay()
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceEvenly, Alignment.CenterVertically) {
-                Text(text = "Note: $detectedNote", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, style = LocalTextStyle.current.copy(shadow = Shadow(Color.Black, blurRadius = 8f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(text = frequencyText, fontSize = 14.sp, color = Color.LightGray, style = LocalTextStyle.current.copy(shadow = Shadow(Color.Black, blurRadius = 6f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(text = statusText, fontSize = 16.sp, color = statusColor, style = LocalTextStyle.current.copy(shadow = Shadow(Color.Black, blurRadius = 8f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    text = "Note: $detectedNote",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    style = LocalTextStyle.current.copy(shadow = Shadow(Color.Black, blurRadius = 8f)),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = frequencyText,
+                    fontSize = 14.sp,
+                    color = Color.LightGray,
+                    style = LocalTextStyle.current.copy(shadow = Shadow(Color.Black, blurRadius = 6f)),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = statusText,
+                    fontSize = 16.sp,
+                    color = statusColor,
+                    style = LocalTextStyle.current.copy(shadow = Shadow(Color.Black, blurRadius = 8f)),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
+
             Spacer(Modifier.height(16.dp))
-            nativeAd?.let { ad ->
-                AnimatedVisibility(visible = isAdVisible, enter = slideInVertically(initialOffsetY = { it / 2 }, animationSpec = tween(500)) + fadeIn(animationSpec = tween(500))) { NativeAdView(ad) }
+
+            // --- FIXED AD CONTAINER (prevents layout jump / keeps bottom UI stable) ---
+            val adContainerHeight = 110.dp
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(adContainerHeight),
+                contentAlignment = Alignment.Center
+            ) {
+                if (nativeAd != null && isAdVisible) {
+                    NativeAdView(ad = nativeAd!!)
+                }
             }
         }
     }
 
     @Composable
     fun MetronomeControls(enabled: Boolean) {
-        Surface(shape = RoundedCornerShape(12.dp), color = Color.Black.copy(alpha = 0.7f), border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.5f))) {
-            Row(Modifier.height(48.dp).padding(horizontal = 8.dp), Arrangement.Center, Alignment.CenterVertically) {
-                IconButton(onClick = { if (tempo > 40) tempo-- }, enabled = enabled) { Icon(Icons.Default.KeyboardArrowLeft, contentDescription = null, tint = Color.White) }
-                Text("$tempo BPM", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.width(80.dp), textAlign = TextAlign.Center)
-                IconButton(onClick = { if (tempo < 240) tempo++ }, enabled = enabled) { Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = Color.White) }
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = Color.Black.copy(alpha = 0.7f),
+            border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.5f))
+        ) {
+            Row(
+                Modifier.height(48.dp).padding(horizontal = 8.dp),
+                Arrangement.Center,
+                Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { if (tempo > 40) tempo-- }, enabled = enabled) {
+                    Icon(Icons.Default.KeyboardArrowLeft, contentDescription = null, tint = Color.White)
+                }
+                Text(
+                    "$tempo BPM",
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    modifier = Modifier.width(80.dp),
+                    textAlign = TextAlign.Center
+                )
+                IconButton(onClick = { if (tempo < 240) tempo++ }, enabled = enabled) {
+                    Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = Color.White)
+                }
                 Spacer(Modifier.width(4.dp))
                 Divider(Modifier.height(24.dp).width(1.dp), color = Color.Gray)
                 Spacer(Modifier.width(4.dp))
-                IconButton(onClick = { timeSignatureIndex = (timeSignatureIndex - 1 + timeSignatures.size) % timeSignatures.size }, enabled = enabled) { Icon(Icons.Default.KeyboardArrowLeft, null, tint = Color.White) }
-                Text(timeSignatures[timeSignatureIndex], color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.width(40.dp), textAlign = TextAlign.Center)
-                IconButton(onClick = { timeSignatureIndex = (timeSignatureIndex + 1) % timeSignatures.size }, enabled = enabled) { Icon(Icons.Default.KeyboardArrowRight, null, tint = Color.White) }
+                IconButton(
+                    onClick = { timeSignatureIndex = (timeSignatureIndex - 1 + timeSignatures.size) % timeSignatures.size },
+                    enabled = enabled
+                ) { Icon(Icons.Default.KeyboardArrowLeft, null, tint = Color.White) }
+                Text(
+                    timeSignatures[timeSignatureIndex],
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    modifier = Modifier.width(40.dp),
+                    textAlign = TextAlign.Center
+                )
+                IconButton(
+                    onClick = { timeSignatureIndex = (timeSignatureIndex + 1) % timeSignatures.size },
+                    enabled = enabled
+                ) { Icon(Icons.Default.KeyboardArrowRight, null, tint = Color.White) }
                 Spacer(Modifier.width(8.dp))
                 Button(
                     onClick = { if (isMetronomeRunning) stopMetronome() else startMetronome() },
-                    enabled = enabled, modifier = Modifier.fillMaxHeight(0.75f),
+                    enabled = enabled,
+                    modifier = Modifier.fillMaxHeight(0.75f),
                     contentPadding = PaddingValues(horizontal = 10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = if (isMetronomeRunning) Color(0xFFE53935) else Color(0xFF43A047))
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isMetronomeRunning) Color(0xFFE53935) else Color(0xFF43A047)
+                    )
                 ) { /* empty */ }
             }
         }
@@ -605,11 +708,19 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     fun VisualizerDisplay() {
-        Box(Modifier.fillMaxWidth(0.9f).height(80.dp).background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp)).padding(8.dp), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier
+                .fillMaxWidth(0.9f)
+                .height(80.dp)
+                .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(8.dp))
+                .padding(8.dp),
+            contentAlignment = Alignment.Center
+        ) {
             when (visualizerMode) {
                 VisualizerMode.BARS     -> BarsVisualizer(Modifier.fillMaxSize(), magnitudes)
                 VisualizerMode.WAVEFORM -> WaveformVisualizer(Modifier.fillMaxSize(), scrollingWaveformData)
-                VisualizerMode.NONE     -> Text("No Visualizer", color = Color.Gray, fontSize = 12.sp)
+                VisualizerMode.NONE     -> Text("No Visualizer", color = Color.Gray, fontSize = 12.sp)
             }
         }
     }
@@ -625,7 +736,11 @@ class MainActivity : ComponentActivity() {
             magnitudes.take(bars).forEachIndexed { i, m ->
                 val h = (m / maxMag).coerceIn(0f, 1f) * size.height
                 val color = lerp(Color.Green, Color.Red, m / maxMag)
-                drawRect(color, topLeft = Offset(i * barWidth, size.height - h), size = Size((barWidth - space).coerceAtLeast(0f), h))
+                drawRect(
+                    color,
+                    topLeft = Offset(i * barWidth, size.height - h),
+                    size = Size((barWidth - space).coerceAtLeast(0f), h)
+                )
             }
         }
     }
@@ -658,7 +773,11 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     fun LedTuningStrip(index: Int) {
-        Row(Modifier.shadow(8.dp, RoundedCornerShape(6.dp), spotColor = Color.Green), Arrangement.Center, Alignment.CenterVertically) {
+        Row(
+            Modifier.shadow(8.dp, RoundedCornerShape(6.dp), spotColor = Color.Green),
+            Arrangement.Center,
+            Alignment.CenterVertically
+        ) {
             (-5..5).forEach {
                 val isActive = when {
                     index < 0 -> it in index until 0
@@ -679,7 +798,12 @@ class MainActivity : ComponentActivity() {
     @Composable
     fun LedIndicator(active: Boolean, activeColor: Color) {
         val c = if (active) activeColor else Color.DarkGray.copy(alpha = 0.5f)
-        Box(Modifier.size(20.dp, 24.dp).background(c, RoundedCornerShape(4.dp)).border(1.dp, Color.Black.copy(alpha = 0.3f), RoundedCornerShape(4.dp)))
+        Box(
+            Modifier
+                .size(20.dp, 24.dp)
+                .background(c, RoundedCornerShape(4.dp))
+                .border(1.dp, Color.Black.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
+        )
     }
 }
 
